@@ -66,6 +66,7 @@ public class Main {
             System.out.println("  7. reboot instance              8. list images            ");
             System.out.println("  9. execute condor_status        10. cost report           ");
             System.out.println(" 11. describe security groups     12. describe security group rules");
+            System.out.println(" 13. create security groups       14. add security group rules");
             System.out.println("                                  99. quit                   ");
             System.out.println("------------------------------------------------------------");
 
@@ -124,6 +125,12 @@ public class Main {
                     break;
                 case 12:
                     describeSecurityGroupRules();
+                    break;
+                case 13:
+                    createSecurityGroup();
+                    break;
+                case 14:
+                    addRule();
                     break;
                 case 99:
                     System.out.println("Exiting...");
@@ -341,7 +348,9 @@ public class Main {
             for (SecurityGroup group : result.getSecurityGroups()) {
                 System.out.println("Group ID: " + group.getGroupId());
                 System.out.println("Description: " + group.getDescription());
-                System.out.println("Rules:");
+                System.out.println("Inbound Rules:");
+
+                // 인바운드 규칙 출력
                 for (IpPermission permission : group.getIpPermissions()) {
                     System.out.printf("  Protocol: %s\n", permission.getIpProtocol());
                     System.out.printf("  Port Range: %s-%s\n",
@@ -352,6 +361,20 @@ public class Main {
                     }
                     System.out.println("");
                 }
+
+                System.out.println("Outbound Rules:");
+
+                // 아웃바운드 규칙 출력
+                for (IpPermission permission : group.getIpPermissionsEgress()) {
+                    System.out.printf("  Protocol: %s\n", permission.getIpProtocol());
+                    System.out.printf("  Port Range: %s-%s\n",
+                            permission.getFromPort() != null ? permission.getFromPort() : "ALL",
+                            permission.getToPort() != null ? permission.getToPort() : "ALL");
+                    for (IpRange range : permission.getIpv4Ranges()) {
+                        System.out.printf("  Destination: %s\n", range.getCidrIp());
+                    }
+                    System.out.println("");
+                }
             }
         } catch (AmazonServiceException e) {
             System.out.printf("Failed to describe security group rules: %s\n", e.getErrorMessage());
@@ -359,6 +382,89 @@ public class Main {
             System.out.printf("Unexpected error: %s\n", e.getMessage());
         }
     }
+
+
+    public static String createSecurityGroup() {
+        Scanner scanner = new Scanner(System.in);
+
+        String vpcId = "vpc-061288b30a6a70220";
+
+        System.out.print("Enter the Security Group Name: ");
+        String groupName = scanner.nextLine();
+
+        System.out.print("Enter the Description of the Security Group: ");
+        String description = scanner.nextLine();
+
+        try {
+            CreateSecurityGroupRequest request = new CreateSecurityGroupRequest()
+                    .withGroupName(groupName)
+                    .withDescription(description)
+                    .withVpcId(vpcId);
+
+            CreateSecurityGroupResult response = ec2.createSecurityGroup(request);
+            String groupId = response.getGroupId();
+            System.out.println("Created security group with ID: " + groupId);
+            return groupId;
+        } catch (AmazonServiceException e) {
+            System.out.printf("Failed to create security group: %s\n", e.getErrorMessage());
+            return null;
+        }
+    }
+
+    public static void addRule() {
+        Scanner scanner = new Scanner(System.in);
+
+        // 사용자에게 보안 그룹 ID 입력 받기
+        System.out.print("Enter the Security Group ID: ");
+        String securityGroupId = scanner.nextLine();
+
+        // 사용자에게 규칙 종류 입력 받기 (인바운드 또는 아웃바운드)
+        System.out.print("Enter the type of rule to add (inbound/outbound): ");
+        String ruleType = scanner.nextLine().toLowerCase();
+
+        // 공통으로 사용할 프로토콜, 포트, CIDR
+        System.out.print("Enter protocol (e.g., tcp): ");
+        String protocol = scanner.nextLine();
+
+        System.out.print("Enter from port: ");
+        int fromPort = Integer.parseInt(scanner.nextLine());
+
+        System.out.print("Enter to port: ");
+        int toPort = Integer.parseInt(scanner.nextLine());
+
+        System.out.print("Enter CIDR IP (e.g., 0.0.0.0/0): ");
+        String cidrIp = scanner.nextLine();
+
+        // 규칙 추가
+        try {
+            IpPermission permission = new IpPermission()
+                    .withIpProtocol(protocol)
+                    .withFromPort(fromPort)
+                    .withToPort(toPort)
+                    .withIpRanges(cidrIp);
+
+            if (ruleType.equals("inbound")) {
+                AuthorizeSecurityGroupIngressRequest ingressRequest = new AuthorizeSecurityGroupIngressRequest()
+                        .withGroupId(securityGroupId)
+                        .withIpPermissions(permission);
+
+                ec2.authorizeSecurityGroupIngress(ingressRequest);
+                System.out.println("Inbound rule added to security group: " + securityGroupId);
+            } else if (ruleType.equals("outbound")) {
+                AuthorizeSecurityGroupEgressRequest egressRequest = new AuthorizeSecurityGroupEgressRequest()
+                        .withGroupId(securityGroupId)
+                        .withIpPermissions(permission);
+
+                ec2.authorizeSecurityGroupEgress(egressRequest);
+                System.out.println("Outbound rule added to security group: " + securityGroupId);
+            } else {
+                System.out.println("Invalid rule type entered. Please enter either 'inbound' or 'outbound'.");
+            }
+        } catch (AmazonServiceException e) {
+            System.out.printf("Failed to add rule: %s\n", e.getErrorMessage());
+        }
+    }
+
 
 
 }
