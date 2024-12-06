@@ -11,6 +11,7 @@ import com.jcraft.jsch.*;
 public class Main {
 
     static AmazonEC2 ec2;
+    public static String master;
 
     private static void init() throws Exception {
         ProfileCredentialsProvider credentialsProvider = new ProfileCredentialsProvider();
@@ -125,6 +126,9 @@ public class Main {
                             instance.getInstanceType(),
                             instance.getState().getName(),
                             instance.getMonitoring().getState());
+                    if ("i-04c458cd611bdd95e".equals(instance.getInstanceId())) {
+                        master = instance.getPublicDnsName();
+                    }
                 }
             }
 
@@ -233,7 +237,7 @@ public class Main {
     public static void executeCondorStatus() {
         // 고정된 EC2 SSH 정보
         String user = "ec2-user";
-        String host = "ec2-52-64-104-139.ap-southeast-2.compute.amazonaws.com";
+        String host = master;
         String privateKeyPath = "C:\\Users\\dongjin\\cloudtest.pem"; // EC2 키 페어 파일 경로 (사용자 환경에 맞게 수정)
 
         try {
