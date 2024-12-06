@@ -2,16 +2,24 @@ package org.example;
 
 import java.util.Scanner;
 import com.amazonaws.AmazonClientException;
+import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.costexplorer.AWSCostExplorer;
+import com.amazonaws.services.costexplorer.AWSCostExplorerClientBuilder;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
 import com.amazonaws.services.ec2.model.*;
+import com.amazonaws.services.costexplorer.model.Granularity;
+import com.amazonaws.services.costexplorer.model.DateInterval;
+import com.amazonaws.services.costexplorer.model.GetCostAndUsageRequest;
+import com.amazonaws.services.costexplorer.model.GetCostAndUsageResult;
 import com.jcraft.jsch.*;
 
 public class Main {
 
     static AmazonEC2 ec2;
     public static String master;
+    private static AWSCostExplorer costExplorer;
 
     private static void init() throws Exception {
         ProfileCredentialsProvider credentialsProvider = new ProfileCredentialsProvider();
@@ -25,8 +33,17 @@ public class Main {
                     e);
         }
 
-        // 리전을 ap-southeast-2로 고정
         ec2 = AmazonEC2ClientBuilder.standard()
+                .withCredentials(credentialsProvider)
+                .withRegion("ap-southeast-2")
+                .build();
+
+        initCostExplorer();
+    }
+
+    private static void initCostExplorer() {
+        ProfileCredentialsProvider credentialsProvider = new ProfileCredentialsProvider();
+        costExplorer = AWSCostExplorerClientBuilder.standard()
                 .withCredentials(credentialsProvider)
                 .withRegion("ap-southeast-2")
                 .build();
@@ -47,8 +64,9 @@ public class Main {
             System.out.println("  3. start instance               4. available regions      ");
             System.out.println("  5. stop instance                6. create instance        ");
             System.out.println("  7. reboot instance              8. list images            ");
-            System.out.println("  9. execute condor_status                                   ");
-            System.out.println("                                 99. quit                   ");
+            System.out.println("  9. execute condor_status        10. cost report           ");
+            System.out.println(" 11. describe security groups     12. describe security group rules");
+            System.out.println("                                  99. quit                   ");
             System.out.println("------------------------------------------------------------");
 
             System.out.print("Enter an integer: ");
@@ -98,6 +116,15 @@ public class Main {
                 case 9:
                     executeCondorStatus();
                     break;
+                case 10:
+                    CostReport();
+                    break;
+                case 11:
+                    describeSecurityGroups();
+                    break;
+                case 12:
+                    describeSecurityGroupRules();
+                    break;
                 case 99:
                     System.out.println("Exiting...");
                     menu.close();
@@ -110,7 +137,7 @@ public class Main {
     }
 
     public static void listInstances() {
-        System.out.println("Listing instances...");
+        System.out.println("\n--- Listing Instances ---");
         DescribeInstancesRequest request = new DescribeInstancesRequest();
         boolean done = false;
 
@@ -119,8 +146,7 @@ public class Main {
 
             for (Reservation reservation : response.getReservations()) {
                 for (Instance instance : reservation.getInstances()) {
-                    System.out.printf(
-                            "[id] %s, [AMI] %s, [type] %s, [state] %10s, [monitoring state] %s\n",
+                    System.out.printf("[ID] %s | [AMI] %s | [Type] %s | [State] %s | [Monitoring] %s\n",
                             instance.getInstanceId(),
                             instance.getImageId(),
                             instance.getInstanceType(),
@@ -133,7 +159,6 @@ public class Main {
             }
 
             request.setNextToken(response.getNextToken());
-
             if (response.getNextToken() == null) {
                 done = true;
             }
@@ -141,21 +166,19 @@ public class Main {
     }
 
     public static void availableZones() {
-        System.out.println("Available zones...");
+        System.out.println("\n--- Available Zones ---");
         DescribeAvailabilityZonesResult result = ec2.describeAvailabilityZones();
 
         for (AvailabilityZone zone : result.getAvailabilityZones()) {
-            System.out.printf("[Zone] %s, [Region] %s, [Zone Name] %s\n",
+            System.out.printf("[Zone] %s | [Region] %s | [Name] %s\n",
                     zone.getZoneId(), zone.getRegionName(), zone.getZoneName());
         }
     }
 
     public static void startInstance(String instanceId) {
-        System.out.printf("Starting instance: %s\n", instanceId);
-
+        System.out.printf("\n--- Starting Instance: %s ---\n", instanceId);
         try {
-            StartInstancesRequest request = new StartInstancesRequest()
-                    .withInstanceIds(instanceId);
+            StartInstancesRequest request = new StartInstancesRequest().withInstanceIds(instanceId);
             ec2.startInstances(request);
             System.out.printf("Successfully started instance: %s\n", instanceId);
         } catch (Exception e) {
@@ -164,11 +187,9 @@ public class Main {
     }
 
     public static void stopInstance(String instanceId) {
-        System.out.printf("Stopping instance: %s\n", instanceId);
-
+        System.out.printf("\n--- Stopping Instance: %s ---\n", instanceId);
         try {
-            StopInstancesRequest request = new StopInstancesRequest()
-                    .withInstanceIds(instanceId);
+            StopInstancesRequest request = new StopInstancesRequest().withInstanceIds(instanceId);
             ec2.stopInstances(request);
             System.out.printf("Successfully stopped instance: %s\n", instanceId);
         } catch (Exception e) {
@@ -177,8 +198,7 @@ public class Main {
     }
 
     public static void createInstance(String amiId) {
-        System.out.printf("Creating instance in region: ap-southeast-2 with AMI: %s\n", amiId);
-
+        System.out.printf("\n--- Creating Instance with AMI: %s ---\n", amiId);
         try {
             RunInstancesRequest request = new RunInstancesRequest()
                     .withImageId(amiId)
@@ -194,11 +214,9 @@ public class Main {
     }
 
     public static void rebootInstance(String instanceId) {
-        System.out.printf("Rebooting instance: %s\n", instanceId);
-
+        System.out.printf("\n--- Rebooting Instance: %s ---\n", instanceId);
         try {
-            RebootInstancesRequest request = new RebootInstancesRequest()
-                    .withInstanceIds(instanceId);
+            RebootInstancesRequest request = new RebootInstancesRequest().withInstanceIds(instanceId);
             ec2.rebootInstances(request);
             System.out.printf("Successfully rebooted instance: %s\n", instanceId);
         } catch (Exception e) {
@@ -207,26 +225,24 @@ public class Main {
     }
 
     public static void availableRegions() {
-        System.out.println("Available regions...");
+        System.out.println("\n--- Available Regions ---");
         DescribeRegionsResult result = ec2.describeRegions();
 
         for (Region region : result.getRegions()) {
-            System.out.printf("[Region] %s, [Endpoint] %s\n",
+            System.out.printf("[Region] %s | [Endpoint] %s\n",
                     region.getRegionName(), region.getEndpoint());
         }
     }
 
     public static void listImages() {
-        System.out.println("Listing images....");
-
-        DescribeImagesRequest request = new DescribeImagesRequest();
-        request.withFilters(new Filter().withName("name").withValues("aws-htcondor-slave"));
+        System.out.println("\n--- Listing Images ---");
+        DescribeImagesRequest request = new DescribeImagesRequest()
+                .withFilters(new Filter().withName("name").withValues("aws-htcondor-slave"));
 
         try {
             DescribeImagesResult results = ec2.describeImages(request);
-
             for (Image image : results.getImages()) {
-                System.out.printf("[ImageID] %s, [Name] %s, [Owner] %s\n",
+                System.out.printf("[ImageID] %s | [Name] %s | [Owner] %s\n",
                         image.getImageId(), image.getName(), image.getOwnerId());
             }
         } catch (Exception e) {
@@ -235,28 +251,22 @@ public class Main {
     }
 
     public static void executeCondorStatus() {
-        // 고정된 EC2 SSH 정보
         String user = "ec2-user";
         String host = master;
-        String privateKeyPath = "C:\\Users\\dongjin\\cloudtest.pem"; // EC2 키 페어 파일 경로 (사용자 환경에 맞게 수정)
+        String privateKeyPath = "C:\\Users\\dongjin\\cloudtest.pem";
 
         try {
             JSch jsch = new JSch();
             jsch.addIdentity(privateKeyPath);
-
-            // 세션 생성
             Session session = jsch.getSession(user, host, 22);
             session.setConfig("StrictHostKeyChecking", "no");
             session.connect();
 
-            // 명령 실행
             ChannelExec channel = (ChannelExec) session.openChannel("exec");
             channel.setCommand("condor_status");
 
             channel.setInputStream(null);
             channel.setErrStream(System.err);
-
-            // 결과 출력
             Scanner outputScanner = new Scanner(channel.getInputStream());
             channel.connect();
 
@@ -271,6 +281,82 @@ public class Main {
             session.disconnect();
         } catch (Exception e) {
             System.out.printf("Failed to execute condor_status: %s\n", e.getMessage());
+        }
+    }
+
+    public static void CostReport() {
+        try {
+            GetCostAndUsageRequest request = new GetCostAndUsageRequest()
+                    .withTimePeriod(new DateInterval().withStart("2024-11-01").withEnd("2024-12-06"))
+                    .withGranularity(Granularity.MONTHLY)
+                    .withMetrics("UnblendedCost");
+
+            GetCostAndUsageResult result = costExplorer.getCostAndUsage(request);
+
+            result.getResultsByTime().forEach(timePeriod -> {
+                System.out.println("\n--- Cost Report ---");
+                System.out.printf("Time Period: %s to %s\n",
+                        timePeriod.getTimePeriod().getStart(), timePeriod.getTimePeriod().getEnd());
+                timePeriod.getTotal().forEach((metric, value) -> {
+                    System.out.printf("%s: %s %s\n",
+                            metric, value.getAmount(), value.getUnit());
+                });
+            });
+        } catch (AmazonServiceException e) {
+            if (e.getErrorCode().equals("DataUnavailableException")) {
+                System.out.println("Cost data is unavailable for the specified time period.");
+            } else {
+                System.out.printf("Failed to retrieve cost report: %s\n", e.getMessage());
+            }
+        }
+    }
+
+    public static void describeSecurityGroups() {
+        System.out.println("\n--- Describing Security Groups ---");
+        DescribeSecurityGroupsRequest request = new DescribeSecurityGroupsRequest();
+
+        try {
+            DescribeSecurityGroupsResult result = ec2.describeSecurityGroups(request);
+            for (SecurityGroup group : result.getSecurityGroups()) {
+                System.out.printf("[Group Name] %s | [Group ID] %s | [Description] %s\n",
+                        group.getGroupName(), group.getGroupId(), group.getDescription());
+            }
+        } catch (Exception e) {
+            System.out.printf("Failed to describe security groups: %s\n", e.getMessage());
+        }
+    }
+
+    public static void describeSecurityGroupRules() {
+        try {
+            System.out.println("\n--- Describing Security Group Rules ---");
+            System.out.print("Enter Security Group ID: ");
+
+            String securityGroupId = new Scanner(System.in).nextLine();
+
+            DescribeSecurityGroupsRequest request = new DescribeSecurityGroupsRequest()
+                    .withGroupIds(securityGroupId);
+
+            DescribeSecurityGroupsResult result = ec2.describeSecurityGroups(request);
+
+            for (SecurityGroup group : result.getSecurityGroups()) {
+                System.out.println("Group ID: " + group.getGroupId());
+                System.out.println("Description: " + group.getDescription());
+                System.out.println("Rules:");
+                for (IpPermission permission : group.getIpPermissions()) {
+                    System.out.printf("  Protocol: %s\n", permission.getIpProtocol());
+                    System.out.printf("  Port Range: %s-%s\n",
+                            permission.getFromPort() != null ? permission.getFromPort() : "ALL",
+                            permission.getToPort() != null ? permission.getToPort() : "ALL");
+                    for (IpRange range : permission.getIpv4Ranges()) {
+                        System.out.printf("  Source: %s\n", range.getCidrIp());
+                    }
+                    System.out.println("");
+                }
+            }
+        } catch (AmazonServiceException e) {
+            System.out.printf("Failed to describe security group rules: %s\n", e.getErrorMessage());
+        } catch (Exception e) {
+            System.out.printf("Unexpected error: %s\n", e.getMessage());
         }
     }
 
